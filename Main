@@ -1,0 +1,241 @@
+
+# !!BEFORE RUNNING!!
+# if testing during market hours:
+#   be sure to comment out the SUBMIT line in the AtMarket_Proceed_Submit function
+#   change the DollarAmount to ~100 so any buy orders fail by default
+
+
+# setup instructions
+# install python
+# install your preferred python IDE
+# install the following packages in CMD (with admin privileges) by typing "pip install" and then the package name
+    # selenium
+    # imaplib
+# create a new gmail email address
+# in the security settings of this email address, allow third party applications
+# sign up for Next Investors mailing list with this email address
+
+
+
+
+# enhancements TODO list
+#   at time of sell, make sure the AT MARKET price is higher than the purchase price
+#   on Fri 14MAY2021, NI sent two emails in one day for the first time.
+#       need to find a way to factor in the time of the last email
+#       or, move the last digested email from NI to another folder so the code can rerun without issue
+#           - prefer this option
+# once the above is done, need to wrap program in a loop so it starts from beginning
+# should move login details to an external file that gets imported so code can be more easily shared
+# once
+# general improvements
+    # remove the need for quotation marks around login details
+    # clean up the imports
+
+# first import a bunch of crap
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+import imaplib
+import email
+from email.header import decode_header
+import webbrowser
+import os
+from datetime import datetime
+import time
+
+
+
+curDate = datetime.today().strftime("%d %b %Y") # format the current date as dd MON yyyy to match the format in the email
+type(curDate)
+print(curDate)
+# account credentials
+username = ""                                   # enter your NI email address here
+password = ""                                   # enter your NI email password here
+sleepDur = 31                                   # number of seconds to sleep for before recommencing email loop
+durBuySell = 450                                # number of seconds to wait before selling shares
+generalSleepDur = 1.5                           # this is to slow the program down in between webpage inputs to avoid misstypes from page/internet delays
+# number of top emails to fetch
+N = 1                                           # number of most recent emails to check
+NI_Email = "admin@nextinvestors.com"            # email address for NI - change to your own email address to test
+
+# ======================= Commsec details # =======================
+
+DollarAmount = 4000                             # this will be the amount of money spent on the trade
+                                                # for testing during market hours change this to $100 so it's guaranteed to fail
+commsex_username =                              # enter your commsec client ID here (no quotation marks needed)
+commsex_pwd = ""                                # enter your commsec password here
+
+
+
+
+
+def checkEmail():                                   # creating a loop function to check for new NI emails
+    while "tickerCode_clean" not in globals():      # check if there is a found ticker code, if yes proceed to buy/sell
+        print("Sleeping...")
+        time.sleep(sleepDur)                        # sleep for time defined above before checking emails again
+
+        imap = imaplib.IMAP4_SSL("imap.gmail.com")  # create an IMAP4 class with SSL
+
+        imap.login(username, password)              # authenticate
+        status, messages = imap.select("INBOX")
+        messages = int(messages[0])
+
+        for i in range(messages, messages-N, -1):
+            # fetch the email message by ID
+            res, msg = imap.fetch(str(i), "(RFC822)")
+            for response in msg:
+                if isinstance(response, tuple):
+                    # parse a bytes email into a message object
+                    msg = email.message_from_bytes(response[1])
+                    # decode the email subject
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        # if it's a bytes, decode to str
+                        subject = subject.decode(encoding)
+                    # decode email sender
+                    From, encoding = decode_header(msg.get("From"))[0]
+                    Date = decode_header(msg.get("Date"))[0]
+                    if isinstance(From, bytes):
+                        From = From.decode(encoding)
+                    print("Subject:", subject)
+                    print("From:", From)
+                    print("Date", Date)
+
+                    #creating 's' which is blank, concatenating to TUPLE email date so it becomes string
+                    s =''
+                    s += "(" + ', '.join(map(str, Date)) + ")"
+                    sliceEmailDate = str(s[6:17])   #now we can slice the email date to extract the date and compare to today's date
+
+                    print(s)
+                    print(type(Date))
+                    print(sliceEmailDate)
+
+                    # if the email message is multipart
+                    if msg.is_multipart():
+                        # iterate over email parts
+                        for part in msg.walk():
+                            # extract content type of email
+                            content_type = part.get_content_type()
+                            content_disposition = str(part.get("Content-Disposition"))
+                            try:
+                                # get the email body
+                                body = part.get_payload(decode=True).decode()
+                                if NI_Email in From and curDate == sliceEmailDate:
+                                        print("!!!NI Email received today!!!")
+                                        tickerCode_raw = body.split("ASX:")[1].split()[0]
+                                        tickerCode_clean = tickerCode_raw[0:3]
+                                        print(i)
+                                        print(tickerCode_clean)
+                                        return tickerCode_clean  if 'tickerCode_clean' in locals() else None
+
+                                elif NI_Email not in From:
+                                    print("Nothing yet...")
+
+                            except:
+                                pass
+                    else:
+                        pass
+        # close the connection and logout
+        imap.close()
+        imap.logout()
+
+
+tickerCode_clean = checkEmail()
+
+
+
+
+# ============================================================
+# NOW GO TO COMMSEC
+# ============================================================
+
+
+commsexHomePage = "https://www2.commsec.com.au/"
+#tickerCode_clean = "TEST"    # used for testing
+# concatenate the below URLs with the ticker code to get the appropriate BUY/SELL page - used later on
+commsexBuyPage = "https://www2.commsec.com.au/Private/EquityTrading/AustralianShares/PlaceOrder.aspx?actionType=buy&stockCode=" +tickerCode_clean
+commsexSellPage = "https://www2.commsec.com.au/Private/EquityTrading/AustralianShares/PlaceOrder.aspx?actionType=sell&stockCode=" +tickerCode_clean
+
+
+options = Options()
+# tell the driver where to find chrome as well as the chrome driver
+options.binary_location = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+driver = webdriver.Chrome(chrome_options=options, executable_path=r"E:\PythonVirtEnv\NextInvestors_MoneyMaker\Lib\site-packages\selenium\webdriver\chrome\chromedriver.exe", )
+
+driver.get(commsexHomePage)
+
+
+# Select the id box
+id_box = driver.find_element_by_name('ctl00$cpContent$txtLogin')    # find the login box on the commsec login page
+id_box.send_keys(commsex_username)                                  # send the client login number
+id_box.send_keys(Keys.TAB)                                          # tab down to password box
+
+# Send id information
+time.sleep(generalSleepDur)
+actions = ActionChains(driver)                                      # ready the browser driver
+actions.send_keys(commsex_pwd)                                      # ready the password for the password box
+actions.perform()                                                   # enter password
+time.sleep(generalSleepDur)
+
+actions_ = ActionChains(driver)                                     # ready the browser driver
+actions_.send_keys(Keys.ENTER)                                      #
+time.sleep(generalSleepDur)
+actions_.perform()
+
+
+driver.get(commsexBuyPage)      # go direct to BUY page
+time.sleep(generalSleepDur)     # wait sec
+
+# the below line extracts the current price of shares based on the last buy order
+getCurPrice = driver.find_element_by_id("ctl00_BodyPlaceHolder_OrderView1_ctl02_ucPriceInfo_ctl02_ctl00_ctl04_lblDetailValue_field").text
+print("Current price of shares:")
+print(getCurPrice)
+
+
+dlr_curPrice = float(DollarAmount/float(getCurPrice))   # divide the $ amount to spend by the current share price
+getCurPrice_c = round(dlr_curPrice,0)                   # this is probably unecessary as we turn to INT immediately below
+ShareQuantity = str(int(getCurPrice_c))                 # take off the trailing decimal point by turning FLOAT to INT
+
+Print("Shares to buy:")
+print(ShareQuantity)
+
+# this is dumb but don't know an easy way around it
+actions_2 = ActionChains(driver)
+actions_3 = ActionChains(driver)
+
+#tab down to QUANTITY box
+actions_2.send_keys(Keys.TAB)
+actions_2.perform()
+time.sleep(generalSleepDur)
+#
+# #enter amount in QUANTITY
+actions_3.send_keys(ShareQuantity)  # ready to enter the number of shares to buy
+actions_3.perform()                 # enter the number of shares to buy
+time.sleep(generalSleepDur)         # wait a sec
+
+def AtMarket_Proceed_Submit():  # this function clicks the AT MARKET checkbox, then the proceed button, then the submit button
+    AtMarketCheckBox = driver.find_element_by_id('ctl00_BodyPlaceHolder_OrderView1_ctl02_cbOrderStyleAtMarket_field').click()
+    time.sleep(1)
+    proceedBox = driver.find_element_by_name('ctl00$BodyPlaceHolder$OrderView1$ctl02$btnPreview$implementation$field').click()
+    time.sleep(1)
+    submitBox = driver.find_element_by_name('ctl00$BodyPlaceHolder$OrderView1$ctl02$ucOrderSpecification$btnSubmitOrder$implementation$field').click()
+
+AtMarket_Proceed_Submit()
+
+
+#================================
+# NOW WE SELL
+#================================
+time.sleep(durBuySell)              # wait roughly 7.5 minutes before selling
+driver.get(commsexSellPage)         # go to sell page
+time.sleep(2)                       # let the page load for a couple of secs
+actions_2.perform()                 # tab down to Quantity box
+actions_3.perform()                 # enter the same number of shares calculated above to sell
+
+AtMarket_Proceed_Submit()
+
